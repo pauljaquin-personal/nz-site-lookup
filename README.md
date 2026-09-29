@@ -39,6 +39,7 @@ The left-hand results panel is organised into six numbered groups:
 4. **Engineering** — AS/NZS 1170.3 ground snow load, NZS 1170.5 equivalent-static site hazard spectrum, and AS/NZS 1170.2 site wind speed, with full wind actions and structural seismic calculations reserved.
 5. **Natural hazards** — reserved for additional public local and regional council hazard mapping.
 6. **Historical mapping** — reserved for historical aerial imagery, survey plans and other mapped site changes.
+7. **AI summary** — a non-interactive placeholder for a future evidence-linked summary workflow; no AI request or assessment is made in the current release.
 
 The LINZ Crown Aerial Film Library search uses the public Retrolens footprint service. It first checks for photograph footprints intersecting the selected site, then expands to 1 km, 5 km and 10 km when no site coverage is returned. Results distinguish photographs covering the point from nearby records and can be displayed as footprint polygons. Scanned records include a direct **View scan** link and a **Show on map** control. Only one selected scan is displayed at a time, using the shared historical-layer opacity control. The overlay is a contextual approximation stretched to the catalogue footprint; the source photography is not orthorectified and must not be used for measurement. This search does not require the browser-stored LINZ key; that key remains necessary for nationwide parcel Appellation lookup. A Retrolens handoff includes a button to copy the selected coordinates for pasting into Retrolens search.
 
@@ -115,3 +116,9 @@ This is screening information only. Coastal distance is measured from the select
 ## Planned extension
 
 Extend the NZS 1170.5 module to the B1/VM1-modified structural design action coefficient and equivalent-static base shear after adding explicit structural inputs such as ductility, structural performance factor, seismic weight and period calculation. Keep the current Verification Method route separate from the SNZ TS 1170.5:2025 Alternative Solution pathway. Add independent data adapters for wind and soil information, while keeping raw location, source metadata and derived engineering values separate so calculations remain auditable.
+
+### AI-summary roadmap
+
+The reserved **AI summary** section is deliberately static in this release. The intended future workflow is to prepare a plainly labelled draft from the already displayed fields and their source links, retaining citations and the distinction between published data, calculated values, user inputs, coverage gaps and limitations. It must not replace engineering judgement, turn screening information into a property assessment, or make an approval or compliance decision.
+
+Before enabling the workflow, the app should provide explicit consent for any external AI request, disclose exactly which site and project fields are sent, minimise data sent, keep source data and the generated draft separately auditable, and require an engineer to review and edit the output before it is exported or relied upon. The implementation should avoid claiming a result where connected data is unavailable and should preserve the existing report's source and limitation records.
