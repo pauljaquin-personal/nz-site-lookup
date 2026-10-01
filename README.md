@@ -6,6 +6,7 @@ A single-page prototype for selecting a New Zealand property by address or map c
 - Direct search by a current legal description such as `Lot 1 DP 26216`, centering the map inside the matched polygon
 - A reserved AI summary tab that currently makes no AI request or automated assessment
 - Local parcel comparison against Queenstown Lakes District Council, Christchurch City Council and Wellington City Council services where their published parcel layers apply; council results can supply a fallback when LINZ is unavailable
+- Territorial authority from the national public TLA boundary point-in-polygon service; local parcel services are shown only as a secondary parcel cross-check
 - NZS 3604:2011 corrosion exposure Zone B, C or D from the BRANZ Maps vector layer
 - Straight-line distance from the selected point to the LINZ NZ Coastline – Mean High Water Springs dataset, with the NZS 3604 500 m coastal Zone D rule applied conservatively
 - BRANZ Maps wind zone: Low through Extra High, or Specific Engineering Design
