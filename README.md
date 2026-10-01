@@ -130,4 +130,6 @@ Extend the NZS 1170.5 module to the B1/VM1-modified structural design action coe
 
 ## Cloudflare Workers deployment
 
+The territorial-authority field uses the national TLA point-in-polygon query. Optional council parcel checks reuse that same boundary result and only query the matching council. Alexandra therefore uses Central Otago District Council and reports its parcel check as not currently connected, rather than querying QLDC. Failed or unmatched boundary lookups leave LINZ available and explicitly mark the council check as not checked. Run `node --test tests/council-lookup.test.cjs` for council selection and service-failure regression checks.
+
 The `wrangler.jsonc` file serves `dist/` as a static Worker named `nz-site-lookup`. Deploy this repository's current `main` with `npx wrangler deploy` in an authenticated Cloudflare environment. A GitHub push alone updates source control; check the Workers deployment and the live HTML separately.

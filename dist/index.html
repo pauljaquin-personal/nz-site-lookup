@@ -512,12 +512,12 @@
     function polygonContains(point,polygon){return polygon.length>0&&ringContains(point,polygon[0])&&!polygon.slice(1).some(r=>ringContains(point,r))}
     function featureContains(feature,lng,lat){const g=feature?.geometry;if(!g)return false;if(g.type==='Polygon')return polygonContains([lng,lat],g.coordinates);if(g.type==='MultiPolygon')return g.coordinates.some(p=>polygonContains([lng,lat],p));return false}
     const PARCEL_LINZ_URL='https://services.arcgis.com/xdsHIIxuCWByZiCB/arcgis/rest/services/LINZ_NZ_Primary_Parcels/FeatureServer/0/query';
-    // These bounds choose only which optional parcel API to query. Territorial authority
-    // always comes from the national TLA point-in-polygon lookup below.
+    // Optional parcel APIs are selected by the confirmed territorial authority.
+    // Service coverage rectangles must never determine the governing council.
     const PARCEL_CROSS_CHECKS=[
-      {name:'Queenstown Lakes District Council',url:'https://services1.arcgis.com/9YyqaQtDdDR8tupG/arcgis/rest/services/Land_Parcels_and_Properties_Data/FeatureServer/0/query',bounds:[167.5,-45.8,170,-43.9],fields:'appellation,parcel_intent,PHYSADDRESS'},
-      {name:'Christchurch City Council',url:'https://gis.ccc.govt.nz/server/rest/services/OpenData/Property/FeatureServer/14/query',bounds:[171.8,-44.1,173.3,-42.9],fields:'LandPlanType,LandPlanTypeCode,LandParcelType,LandParcelNumber,LandPlanNumber,PartIndicator,RecordStatus'},
-      {name:'Wellington City Council',url:'https://gis.wcc.govt.nz/arcgis/rest/services/PropertyAndBoundaries/Parcels/MapServer/0/query',bounds:[174.4,-41.55,175.1,-41.05],fields:'full_app,parcel_id'}
+      {name:'Queenstown Lakes District Council',url:'https://services1.arcgis.com/9YyqaQtDdDR8tupG/arcgis/rest/services/Land_Parcels_and_Properties_Data/FeatureServer/0/query',fields:'appellation,parcel_intent,PHYSADDRESS'},
+      {name:'Christchurch City Council',url:'https://gis.ccc.govt.nz/server/rest/services/OpenData/Property/FeatureServer/14/query',fields:'LandPlanType,LandPlanTypeCode,LandParcelType,LandParcelNumber,LandPlanNumber,PartIndicator,RecordStatus'},
+      {name:'Wellington City Council',url:'https://gis.wcc.govt.nz/arcgis/rest/services/PropertyAndBoundaries/Parcels/MapServer/0/query',fields:'full_app,parcel_id'}
     ];
     function parcelParts(appellation){
       const match=String(appellation||'').match(/\b(Part\s+)?(Lot|Section|Sec|Unit|Flat)\s+([\w.-]+)\s+(DP|SO|LT|ML|CFR)\s*([\w.-]+)/i);
@@ -579,16 +579,21 @@
       return {available:true,distance:null,greaterThan:10000,within500:false,source:LINZ_COASTLINE_NAME};
     }
     function formatCoastalDistance(result){if(Number.isFinite(result?.distance))return result.distance<1000?`${Math.round(result.distance)} m`:`${(result.distance/1000).toFixed(result.distance<10000?1:0)} km`;if(Number.isFinite(result?.greaterThan))return `More than ${result.greaterThan>=1000?`${result.greaterThan/1000} km`:`${result.greaterThan} m`}`;return null}
-    async function getParcel(lat,lng){
-      const council=PARCEL_CROSS_CHECKS.find(c=>lng>=c.bounds[0]&&lat>=c.bounds[1]&&lng<=c.bounds[2]&&lat<=c.bounds[3]);
-      const [linz,local]=await Promise.allSettled([getLinzParcel(lat,lng),council?queryParcelLayer(council.url,council.fields,lat,lng):Promise.resolve([])]);
+    async function getCouncilParcelCheck(lat,lng,authorityLookup){
+      let authority;try{authority=(await authorityLookup)?.authority}catch(error){return {status:'Not checked — territorial authority unavailable'}}
+      if(!authority)return {status:'Not checked — no territorial authority boundary match'};
+      const council=PARCEL_CROSS_CHECKS.find(c=>normaliseAuthority(c.name)===normaliseAuthority(authority));
+      if(!council)return {status:`Not currently connected for ${displayTerritorialAuthority(authority)}`};
+      try{return {council,rows:await queryParcelLayer(council.url,council.fields,lat,lng)}}catch(error){return {council,status:`${council.name}: unavailable`}}
+    }
+    async function getParcel(lat,lng,authorityLookup=getH1ClimateZone(lat,lng)){
+      const [linz,local]=await Promise.allSettled([getLinzParcel(lat,lng),getCouncilParcelCheck(lat,lng,authorityLookup)]);
+      const check=local.status==='fulfilled'?local.value:{status:'Council parcel check unavailable'},council=check.council;
       const national=linz.status==='fulfilled'?linz.value:null;
-      const nearby=local.status==='fulfilled'?preferParcel(local.value,council?.name):null;
-      if(!national&&!nearby){if(linz.status==='rejected'&&(!council||local.status==='rejected'))throw new Error('Parcel services unavailable at this location');return {appellation:null,match:'No parcel polygon contains the selected point',council:council?.name||null}}
-      const result={...(national||nearby)};
-      if(council){
-        result.council=local.status==='rejected'?`${council.name}: unavailable`:nearby?(national&&nearby.appellation.replace(/\s+/g,' ').toLowerCase()!==national.appellation.replace(/\s+/g,' ').toLowerCase()?`${council.name}: ${nearby.appellation} (differs from LINZ)`:`${council.name}: ${nearby.appellation} (agrees)`):`${council.name}: no intersecting parcel`;
-      }
+      const nearby=preferParcel(check.rows||[],council?.name);
+      const councilStatus=check.status||`${council.name}: ${nearby?nearby.appellation+(national?(nearby.appellation.replace(/\s+/g,' ').toLowerCase()!==national.appellation.replace(/\s+/g,' ').toLowerCase()?' (differs from LINZ)':' (agrees with LINZ)'):' (LINZ comparison unavailable)'):'no intersecting parcel'}`;
+      if(!national&&!nearby)return {appellation:null,match:linz.status==='rejected'?'Parcel services unavailable at this location':'No parcel polygon contains the selected point',council:councilStatus};
+      const result={...(national||nearby),council:councilStatus};
       if(linz.status==='rejected'&&nearby)result.match+=' (LINZ unavailable)';
       return result;
     }
@@ -883,7 +888,8 @@
       setPropertySelectionMode(false);
       clearResults();placeMarker(lat,lng);applySnowSuggestion(lat,lng);setStatus('Looking up site information…');
       searchLinzAerialPhotos();
-      const tasks=[getElevation(lat,lng),reverseGeocode(lat,lng),getParcel(lat,lng),getCorrosionZone(lat,lng),getCoastalDistance(lat,lng),getWindZone(lat,lng),getEarthquakeZone(lat,lng),getH1ClimateZone(lat,lng),getGeology(lat,lng),getLiquefaction(lat,lng),getActiveFaultInfo(lat,lng),getOrcHazards(lat,lng)];
+      const authorityLookup=getH1ClimateZone(lat,lng);
+      const tasks=[getElevation(lat,lng),reverseGeocode(lat,lng),getParcel(lat,lng,authorityLookup),getCorrosionZone(lat,lng),getCoastalDistance(lat,lng),getWindZone(lat,lng),getEarthquakeZone(lat,lng),authorityLookup,getGeology(lat,lng),getLiquefaction(lat,lng),getActiveFaultInfo(lat,lng),getOrcHazards(lat,lng)];
       const [elev,geo,parcel,corrosion,coast,wind,earthquake,climate,geology,liquefaction,activeFault,naturalHazards]=await Promise.allSettled(tasks);
       if(elev.status==='fulfilled'){const siteElevation=Math.round(elev.value.value);setValue('elevation',`${siteElevation} m (${elev.value.source})`);$('snowElevation').value=String(siteElevation);$('engWindElevation').value=String(siteElevation);calculateGroundSnow();applyEngineeringWindSuggestion(lat,lng)}
       if(geo.status==='fulfilled'){const resolvedAddress=addressLabel||geo.value.display_name;showSelectedAddress(resolvedAddress);applySeismicLocalitySuggestion(resolvedAddress)}else if(addressLabel){showSelectedAddress(addressLabel);applySeismicLocalitySuggestion(addressLabel)}else applySeismicLocalitySuggestion('');
@@ -893,7 +899,7 @@
       if(coastResult?.available){setValue('coastalDistance',formatCoastalDistance(coastResult));setValue('coastalSource',coastResult.source);setValue('coastalRule',coastRaisesZone?'Triggered — within 500 m':'Not triggered — beyond 500 m');setValue('corrosionBasis',coastRaisesZone?(mappedZone&&mappedZone!=='D'?`Coastline rule raises BRANZ Zone ${mappedZone} to governing Zone D`:'Zone D confirmed by the coastline rule'):(mappedZone?`BRANZ Zone ${mappedZone} retained; coastal distance cannot downgrade it`:'Coastline rule not triggered; no BRANZ polygon result was returned'))}else if(coastResult){setValue('coastalRule','Not checked');setValue('corrosionBasis',mappedZone?`BRANZ Zone ${mappedZone} retained; ${coastResult.reason}`:coastResult.reason)}else if(coast.status==='rejected'){setValue('coastalRule','Lookup unavailable');setValue('corrosionBasis',mappedZone?`BRANZ Zone ${mappedZone} retained; coastline lookup failed`:'Coastline lookup failed');setValue('coastalSource',LINZ_COASTLINE_NAME)}
       if(wind.status==='fulfilled'&&wind.value){setValue('windZone',wind.value.zone);$('windZone').classList.add('zone-badge')}else $('windZone').classList.remove('zone-badge');calculateEngineeringWind();
       if(earthquake.status==='fulfilled'&&earthquake.value){setValue('earthquakeZone',`Zone ${earthquake.value.zone}`);$('earthquakeZone').classList.add('zone-badge')}else $('earthquakeZone').classList.remove('zone-badge');
-      if(climate.status==='fulfilled'&&climate.value){setValue('territorialAuthority',displayTerritorialAuthority(climate.value.authority));setValue('h1Authority',climate.value.authority);if(climate.value.zone){setValue('h1Zone',`Climate zone ${climate.value.zone}`);$('h1Zone').classList.add('zone-badge')}else $('h1Zone').classList.remove('zone-badge')}else $('h1Zone').classList.remove('zone-badge');
+      if(climate.status==='fulfilled'&&climate.value){setValue('territorialAuthority',displayTerritorialAuthority(climate.value.authority));setValue('h1Authority',climate.value.authority);if(climate.value.zone){setValue('h1Zone',`Climate zone ${climate.value.zone}`);$('h1Zone').classList.add('zone-badge')}else $('h1Zone').classList.remove('zone-badge')}else{setValue('territorialAuthority',climate.status==='rejected'?'Boundary lookup unavailable':'No territorial authority boundary match');$('h1Zone').classList.remove('zone-badge')}
       if(geology.status==='fulfilled'&&geology.value){const a=geology.value;setValue('geologyUnit',a.mapname||a.simplename);setValue('geologyCode',a.mapsymbol);setValue('geologyRock',a.mainrock||a.rockgroup);setValue('geologyLithology',a.lithology);setValue('geologyClass',a.rockclass);setValue('geologyAge',geologyAge(a));setValue('geologyDescription',a.descr);setValue('geologyAccuracy',Number.isFinite(Number(a.posacc_m))?`±${Number(a.posacc_m).toLocaleString('en-NZ')} m (mapped)`:null)}
       activeLiquefactionSource=null;$('liquefactionCategory').classList.remove('zone-badge');if(liquefaction.status==='fulfilled'&&liquefaction.value){const value=liquefaction.value;setValue('liquefactionCategory',value.mapped?value.category:'Not mapped by connected services');setValue('liquefactionSource',value.mapped?value.source:null);setValue('liquefactionAssessment',value.mapped?[value.assessment,value.detail].filter(Boolean).join(' · '):null);setValue('liquefactionCoverage',value.coverage);activeLiquefactionSource=value.definition||null;$('liquefactionCategory').classList.toggle('zone-badge',Boolean(value.mapped))}
       if(activeFault.status==='fulfilled'&&activeFault.value){const {nearest,planning}=activeFault.value;if(nearest){setValue('faultName',nearest.name);setValue('faultDistance',formatFaultDistance(nearest.distance));setValue('faultTraceSource',nearest.resolution==='High resolution'?'NZAFD high-resolution trace':'NZAFD national trace, intended for use at 1:250,000');setValue('faultAccuracy',nearest.accuracy);setValue('faultSense',nearest.sense);setValue('faultRecurrence',nearest.recurrence);setValue('faultSlipRate',nearest.slipRate);setValue('faultLastEvent',nearest.lastEvent)}else{setValue('faultName','No mapped trace returned within the search area');setValue('faultTraceSource','Search extended to approximately 100 km')}setValue('faultPlanningArea',planning.length?planning.map(area=>`${area.type}: ${area.name}`).join(' · '):'No GNS Fault Avoidance or Awareness polygon at this point (coverage is limited)');applySeismicFaultSuggestion(nearest)}else applySeismicFaultSuggestion(null);
